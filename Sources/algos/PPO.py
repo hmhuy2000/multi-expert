@@ -175,7 +175,6 @@ class PPO_continuous(Algorithm):
     def save_models(self,save_dir):
         os.makedirs(save_dir,exist_ok=True)
         torch.save(self.actor.state_dict(), f'{save_dir}/actor.pth')
-        torch.save(self.critic.state_dict(), f'{save_dir}/critic.pth')
 
     def train(self):
         self.actor.train()
