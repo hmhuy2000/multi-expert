@@ -5,9 +5,10 @@ sys.path.append('./')
 def main():
     import safety_gymnasium
     from Sources.utils import VectorizedWrapper
+    num_envs = 25
 
     sample_env = safety_gymnasium.make('SafetyPointPush1-v0')
-    env = [safety_gymnasium.make(id='SafetyPointPush1-v0') for _ in range(10)]
+    env = [safety_gymnasium.make(id='SafetyPointPush1-v0') for _ in range(num_envs)]
     env = VectorizedWrapper(env)
     state_shape=sample_env.observation_space.shape
     action_shape=sample_env.action_space.shape
@@ -28,6 +29,12 @@ def main():
             action = actor(state)
         return action.cpu().numpy()
 
+    def explore(actor,state):
+        state = torch.tensor(state, dtype=torch.float, device=device)
+        with torch.no_grad():
+            (action,log_pi) = actor.sample(state)
+        return action.cpu().numpy(),log_pi.cpu().numpy()
+
     expert_actor = StateIndependentPolicy(
             state_shape=state_shape,
             action_shape=action_shape,
@@ -35,10 +42,12 @@ def main():
             hidden_activation=nn.Tanh()
         ).to(device)
     expert_actor.load_state_dict(torch.load(
-        './weights/PPO/(1.621)-(1.00)-(16.21)-(46.90)/actor.pth'
+        './weights/PPO/(0.214)-(1.00)-(2.14)-(63.67)/actor.pth'
+        # './weights/PPO/(0.696)-(1.00)-(6.96)-(47.28)/actor.pth'
+        # './weights/PPO/(1.135)-(1.00)-(11.35)-(38.87)/actor.pth'
     ))
     expert_actor.eval()
-    buffer_size = 5
+    buffer_size = 1000
     rollout_traj_buffer = Trajectory_Buffer(
         buffer_size=buffer_size,
         traj_len=1000, 
@@ -48,26 +57,26 @@ def main():
     )
 
     while(rollout_traj_buffer._n<buffer_size):
-        print(f'{rollout_traj_buffer._n}/{buffer_size}',end='\r')
         state,_ = env.reset()
-        episode_return = np.array([0.0 for _ in range(10)])
-        episode_cost = np.array([0.0 for _ in range(10)])
-        tmp_buffer = [[] for _ in range(10)]
+        episode_return = np.array([0.0 for _ in range(num_envs)])
+        episode_cost = np.array([0.0 for _ in range(num_envs)])
+        tmp_buffer = [[] for _ in range(num_envs)]
 
         for iter in range(1000):
-            action = exploit(expert_actor,state)
+            # action = exploit(expert_actor,state)
+            action,log_pi = explore(expert_actor,state)
             next_state, reward, cost, done, _, _ = env.step(action)
-            for idx in range(10):
+            for idx in range(num_envs):
                 tmp_buffer[idx].append((state[idx], action[idx], next_state[idx]))
             episode_return += reward
             episode_cost += cost
             state = next_state
         
-        for idx in range(10):
+        for idx in range(num_envs):
             if (rollout_traj_buffer._n==buffer_size):
                 break
-            if (episode_return[idx]<10):
-                continue
+            # if (episode_return[idx]<10):
+            #     continue
             arr_states = []
             arr_actions = []
             arr_next_states = []
@@ -81,8 +90,10 @@ def main():
             rollout_traj_buffer.append(arr_states,arr_actions,episode_return[idx],
                     episode_cost[idx], arr_next_states)
             
+        print(f'{rollout_traj_buffer._n}/{buffer_size},{rollout_traj_buffer.total_rewards.mean():.2f},{rollout_traj_buffer.total_costs.mean():.2f}',end='\r')
+            
     print(rollout_traj_buffer.total_rewards.mean(),rollout_traj_buffer.total_costs.mean())
-    rollout_traj_buffer.save(f'./weights/buffers/{buffer_size}.pt')
+    rollout_traj_buffer.save(f'./buffers/e/{buffer_size}.pt')
     env.close()
 
 if __name__ == '__main__':
