@@ -47,7 +47,7 @@ class MLE_onpolicy(PPO_continuous):
             self.optim_failure = Adam(self.failure_network.parameters(), lr=3*lr_critic)
         self.return_cost = []
         self.tmp_return_cost = [0 for _ in range(self.num_envs)]
-        self.batch_size = 128
+        self.batch_size = 64
         
     def step(self, env, state, ep_len):
         action, log_pi = self.explore(state)
@@ -100,13 +100,14 @@ class MLE_onpolicy(PPO_continuous):
         
         for _ in range(1000):
             pi_states,pi_actions,pi_total_rewards,pi_total_costs,pi_next_states = \
-                self.rollout_traj_buffer.sample(batch_size=self.batch_size//2)
+                self.rollout_traj_buffer.sample(batch_size=self.batch_size)
             exp_states,exp_actions,exp_total_rewards,exp_total_costs,exp_next_states = \
-                self.expert_buffer.sample(batch_size=self.batch_size//2)
-            pi_fail_scores,exp_fail_scores = self.update_failure_network(
-                                torch.concat((pi_states,exp_states),dim=0),
-                                torch.concat((pi_actions,exp_actions),dim=0),
-                                torch.concat((pi_total_rewards,exp_total_rewards),dim=0))
+                self.expert_buffer.sample(batch_size=self.batch_size)
+            pi_fail_scores, exp_fail_scores = self.update_failure_network(
+                pi_states,exp_states,
+                pi_actions,exp_actions,
+                pi_total_rewards,exp_total_rewards
+                )
 
         env_rewards = env_rewards.clamp(min=-3.0,max=3.0)
         failure_rewards = -self.failure_network.get_falure_state_action_score(states, actions).detach()
@@ -124,23 +125,29 @@ class MLE_onpolicy(PPO_continuous):
         self.return_reward = []
         self.ep_len = []
 
-    def update_failure_network(self,pi_states,pi_actions,pi_total_rewards):
-        fail_scores = self.failure_network.get_falure_trajectory_score(pi_states,pi_actions)
-        pi_fail_scores = fail_scores[:self.batch_size//2]
-        exp_fail_scores = fail_scores[self.batch_size//2:]
+    def update_failure_network(self,
+                               noise_states,exp_states,
+                                noise_actions,exp_actions,
+                                noise_total_rewards,exp_total_rewards
+                               ):
+        noise_fail_scores = self.failure_network.get_falure_trajectory_score(noise_states,noise_actions)
+        exp_fail_scores = self.failure_network.get_falure_trajectory_score(exp_states,exp_actions)
+
+        fail_scores = torch.concat((noise_fail_scores,exp_fail_scores),dim=0)
+        total_rewards  = torch.concat((noise_total_rewards,exp_total_rewards),dim=0)
 
         fail_matrix = fail_scores - fail_scores.view(1, -1)
-        reward_dist = (pi_total_rewards - pi_total_rewards.view(1, -1))
+        reward_dist = (total_rewards - total_rewards.view(1, -1))
         factor = 1/((3*reward_dist).clamp(min=1.0).detach())
 
-        loss_falure = (reward_dist.clamp(min=0.0,max=1.0).detach()*(factor*fail_matrix**2 + fail_matrix)).mean()
+        loss_failure = (reward_dist.clamp(min=0.0,max=1.0).detach()*(factor*fail_matrix**2 + fail_matrix)).mean()
         loss_expert = (exp_fail_scores**2).mean()
         self.optim_failure.zero_grad()
-        (loss_falure+loss_expert).backward(retain_graph=False)
+        (loss_failure+loss_expert).backward(retain_graph=False)
         nn.utils.clip_grad_norm_(self.failure_network.parameters(), self.max_grad_norm)
         self.optim_failure.step()
-        return pi_fail_scores.mean().item(),exp_fail_scores.mean().item()
-    
+        return noise_fail_scores.mean().item(), exp_fail_scores.mean().item()
+
 class MLE_offpolicy(SAC_continuous):
     def __init__(self,expert_buffer, noisy_buffer, state_shape, action_shape, device, seed, gamma,
             SAC_batch_size, buffer_size, lr_actor, lr_critic, 

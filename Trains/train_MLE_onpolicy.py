@@ -21,7 +21,7 @@ def main():
     sample_env.close()
 
     #------------------------------------------#
-    from Sources.algos.MLE import MLE
+    from Sources.algos.MLE import MLE_onpolicy
     from Sources.buffers.rollout_buffers import Trajectory_Buffer
     from copy import deepcopy
     import threading
@@ -102,7 +102,8 @@ def main():
 
     setproctitle.setproctitle(f'{env_name}-PPO-{seed}')
     
-    num_expert = 5
+    num_expert = int(expert_buffer_path.split('/')[-1].split('.')[0])
+    print('expert buffer:',num_expert,expert_buffer_path)
     expert_buffer = Trajectory_Buffer(
         buffer_size=num_expert,
         traj_len=max_episode_length, 
@@ -110,9 +111,20 @@ def main():
         action_shape=action_shape, 
         device=device,
     )
-    expert_buffer.load(f'./weights/buffers/{num_expert}.pt')
+    expert_buffer.load(expert_buffer_path)
 
-    algo = MLE(expert_buffer=expert_buffer,state_shape=state_shape, action_shape=action_shape,
+    num_expert = int(noisy_buffer_path.split('/')[-1].split('.')[0])
+    print('noisy buffer:',num_expert,noisy_buffer_path)
+    noisy_buffer = Trajectory_Buffer(
+        buffer_size=num_expert,
+        traj_len=max_episode_length, 
+        state_shape=state_shape, 
+        action_shape=action_shape, 
+        device=device,
+    )
+    noisy_buffer.load(noisy_buffer_path)
+
+    algo = MLE_onpolicy(expert_buffer=expert_buffer,state_shape=state_shape, action_shape=action_shape,
             device=device, seed=seed, gamma=gamma,buffer_size=buffer_size,
             hidden_units_actor=hidden_units_actor,hidden_units_critic=hidden_units_critic,
             lr_actor=lr_actor,lr_critic=lr_critic, epoch_ppo=epoch_ppo,

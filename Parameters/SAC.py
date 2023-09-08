@@ -5,11 +5,11 @@ import argparse
 parser = argparse.ArgumentParser()
 
 training_group = parser.add_argument_group('SAC_training')
-training_group.add_argument('--env_name',type=str,default='SafetyPointPush1-v0')
+training_group.add_argument('--env_name',type=str,default='SafetyPointButton1-v0')
 training_group.add_argument('--gamma', type=float, default=0.99)
 training_group.add_argument('--device_name', type=str, default='cuda')
 training_group.add_argument('--seed', type=int, default=0)
-training_group.add_argument('--buffer_size',type=int,default=int(1e5))
+training_group.add_argument('--buffer_size',type=int,default=int(1e6))
 training_group.add_argument('--hidden_units_actor',type=int,default=256)
 training_group.add_argument('--hidden_units_critic',type=int,default=256)
 training_group.add_argument('--number_layers',type=int,default=3)
@@ -24,10 +24,10 @@ training_group.add_argument('--eval_interval',type=int,default=int(2e4))
 training_group.add_argument('--num_eval_episodes',type=int,default=100)
 training_group.add_argument('--max_episode_length',type=int,default=1000)
 training_group.add_argument('--reward_factor',type=float,default=1.0)
-training_group.add_argument('--tau',type=float,default=5e-3)
-training_group.add_argument('--start_steps',type=int,default=int(5000))
+training_group.add_argument('--tau',type=float,default=1e-2)
+training_group.add_argument('--start_steps',type=int,default=int(5e3))
 training_group.add_argument('--log_freq',type=int,default=int(1e4))
-training_group.add_argument('--weight_path', type=str, default='./weights/SAC')
+training_group.add_argument('--weight_path', type=str, default='./weights')
 
 training_group.add_argument('--begin_cpu',type=int,default=0)
 training_group.add_argument('--end_cpu',type=int,default=96)
@@ -71,7 +71,10 @@ log_freq                                = args.log_freq
 eval_num_envs                           = args.eval_num_envs
 weight_path                             = args.weight_path
 
-
+os.makedirs(weight_path,exist_ok=True)
+weight_path = os.path.join(weight_path,env_name)
+os.makedirs(weight_path,exist_ok=True)
+weight_path = os.path.join(weight_path,'SAC')
 log_path = f'{weight_path}/log_data'
 os.makedirs(weight_path,exist_ok=True)
 os.makedirs(log_path,exist_ok=True)

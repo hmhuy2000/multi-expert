@@ -25,14 +25,14 @@ training_group.add_argument('--eval_interval',type=int,default=int(3e5))
 training_group.add_argument('--num_eval_episodes',type=int,default=100)
 training_group.add_argument('--max_episode_length',type=int,default=1000)
 training_group.add_argument('--reward_factor',type=float,default=1.0)
-training_group.add_argument('--weight_path', type=str, default='./weights/MLE')
-training_group.add_argument('--expert_buffer', type=str, default=None)
-training_group.add_argument('--noisy_buffer', type=str, default=None)
+training_group.add_argument('--weight_path', type=str, default='./weights')
+training_group.add_argument('--expert_buffer_path', type=str, default=None)
+training_group.add_argument('--noisy_buffer_path', type=str, default=None)
 
 training_group.add_argument('--begin_cpu',type=int,default=0)
 training_group.add_argument('--end_cpu',type=int,default=96)
 training_group.add_argument('--num_envs',type=int,default=25)
-training_group.add_argument('--eval_num_envs',type=int,default=25)
+training_group.add_argument('--eval_num_envs',type=int,default=0)
 
 #-------------------------------------------------------------------------------------------------#
 
@@ -69,10 +69,10 @@ max_episode_length                      = args.max_episode_length
 num_envs                                = args.num_envs
 eval_num_envs                           = args.eval_num_envs
 weight_path                             = args.weight_path
-expert_buffer                           = args.expert_buffer
-noisy_buffer                            = args.noisy_buffer
+expert_buffer_path                      = args.expert_buffer_path
+noisy_buffer_path                       = args.noisy_buffer_path
 
-
+weight_path = os.path.join(weight_path,env_name,'MLE_onpolicy')
 log_path = f'{weight_path}/log_data'
 os.makedirs(weight_path,exist_ok=True)
 os.makedirs(log_path,exist_ok=True)

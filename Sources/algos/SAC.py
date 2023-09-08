@@ -3,6 +3,7 @@ import os
 import torch
 from torch import nn
 from torch.optim import Adam
+import torch.nn.functional as F
 
 def soft_update(target, source, tau):
     for t, s in zip(target.parameters(), source.parameters()):
@@ -60,10 +61,12 @@ class SAC_continuous(Algorithm):
             self.alpha = 1.0
             self.num_envs = 1
             self.reward_factor = reward_factor
-            self.log_alpha = torch.zeros(1, device=device, requires_grad=True)
+            self.alpha = torch.tensor(0.0).to(self.device)
+            self.alpha.requires_grad = True
+
             self.optim_actor = Adam(self.actor.parameters(), lr=lr_actor)
             self.optim_critic = Adam(self.critic.parameters(), lr=lr_critic)
-            self.optim_alpha = torch.optim.Adam([self.log_alpha], lr=lr_alpha)
+            self.optim_alpha = torch.optim.Adam([self.alpha], lr=lr_alpha)
 
         self.max_grad_norm = max_grad_norm
         self.max_episode_length = max_episode_length
@@ -129,7 +132,7 @@ class SAC_continuous(Algorithm):
         with torch.no_grad():
             next_actions, log_pis = self.actor.sample(next_states)
             next_qs1, next_qs2 = self.critic_target(next_states, next_actions)
-            next_qs = torch.min(next_qs1, next_qs2) - self.alpha * log_pis
+            next_qs = torch.min(next_qs1, next_qs2) - F.softplus(self.alpha) * log_pis
         target_qs = rewards + (1.0 - dones) * self.gamma * next_qs
 
         loss_critic1 = (curr_qs1 - target_qs).pow_(2).mean()
@@ -157,7 +160,8 @@ class SAC_continuous(Algorithm):
     def update_actor(self, states, log_info):
         actions, log_pis = self.actor.sample(states)
         qs1, qs2 = self.critic(states, actions)
-        loss_actor = self.alpha * log_pis.mean() - torch.min(qs1, qs2).mean()
+        alpha = F.softplus(self.alpha).detach()
+        loss_actor = alpha * log_pis.mean() - torch.min(qs1, qs2).mean()
 
         self.optim_actor.zero_grad()
         loss_actor.backward(retain_graph=False)
@@ -165,19 +169,17 @@ class SAC_continuous(Algorithm):
         self.optim_actor.step()
 
         entropy = -log_pis.detach_().mean()
-        loss_alpha = -self.log_alpha * (self.target_entropy - entropy)
+        loss_alpha = -F.softplus(self.alpha) * (self.target_entropy - entropy)
 
         self.optim_alpha.zero_grad()
         loss_alpha.backward(retain_graph=False)
         self.optim_alpha.step()
 
-        with torch.no_grad():
-            self.alpha = self.log_alpha.exp().item()
-            
         log_info.update({
             'Loss/actor_loss':loss_actor.item(),
+            'Loss/entropy_loss':alpha * log_pis.mean().item(),
             'Update/entropy':entropy.item(),
-            'Update/alpha':self.alpha,
+            'Update/alpha':alpha,
             'Update/log_pis':log_pis.mean().item(),
         })
 
