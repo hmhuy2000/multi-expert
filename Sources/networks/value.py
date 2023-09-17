@@ -30,7 +30,7 @@ class StateFunction(nn.Module):
 class StateActionFunction(nn.Module):
 
     def __init__(self, state_shape,action_shape, hidden_units=(64, 64),
-                 hidden_activation=nn.Tanh(),output_activation=None,add_dim=0):
+                 hidden_activation=nn.Tanh(),output_activation=None,add_dim=0,num_class=0):
         super().__init__()
         self.net = build_mlp(
             input_dim=state_shape[0]+action_shape[0]+add_dim,
@@ -39,6 +39,15 @@ class StateActionFunction(nn.Module):
             hidden_activation=hidden_activation,
             output_activation=output_activation
         )
+        if (num_class>0):
+            self.classifier = build_mlp(
+                input_dim=1,
+                output_dim=num_class,
+                hidden_units=[],
+                hidden_activation=hidden_activation,
+                output_activation=output_activation
+            )
+
         self.apply(self.init_weights)
 
     def init_weights(self, layer):
@@ -50,7 +59,8 @@ class StateActionFunction(nn.Module):
         return self.net(torch.cat((states,actions),dim=-1))
     
     def get_falure_state_action_score(self, states, actions):
-        return self.forward(states,actions)
+        # return self.forward(states,actions)
+        return F.sigmoid(self.forward(states,actions))*0.01
     
     def get_falure_trajectory_score(self, states,actions):
         batch_size = states.shape[0]
@@ -58,6 +68,11 @@ class StateActionFunction(nn.Module):
         scores = torch.reshape(scores, (batch_size,-1))
         scores = torch.sum(scores,dim=-1,keepdim=True)
         return scores
+
+    def classify_trajectory(self,states,actions):
+        scores = self.get_falure_trajectory_score(states,actions)
+        predicts = self.classifier(scores)
+        return predicts,scores
     
 class TwinnedStateActionFunction(nn.Module):
 

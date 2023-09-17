@@ -108,16 +108,16 @@ class Trajectory_Buffer:
     def load(self,path):
         tmp = torch.load(path)
         self._n = tmp['states'].size(0)
-        assert self.total_size==self._n
-        self.states             = tmp['states'].clone().to(self.device)
-        self.actions            = tmp['actions'].clone().to(self.device)
-        self.total_rewards      = tmp['total_rewards'].clone().to(self.device)
-        self.total_costs        = tmp['total_costs'].clone().to(self.device)
-        self.next_states        = tmp['next_states'].clone().to(self.device)
+        assert self.total_size<=self._n,'buffer too big'
+        self.states             = tmp['states'][:self.total_size].clone().to(self.device)
+        self.actions            = tmp['actions'][:self.total_size].clone().to(self.device)
+        self.total_rewards      = tmp['total_rewards'][:self.total_size].clone().to(self.device)
+        self.total_costs        = tmp['total_costs'][:self.total_size].clone().to(self.device)
+        self.next_states        = tmp['next_states'][:self.total_size].clone().to(self.device)
+        self._n = self.total_size
 
     def save(self, path):
-        if not os.path.exists(os.path.dirname(path)):
-            os.makedirs(os.path.dirname(path))
+        os.makedirs(os.path.dirname(path))
         torch.save({
             'states': self.states.clone().cpu(),
             'actions': self.actions.clone().cpu(),

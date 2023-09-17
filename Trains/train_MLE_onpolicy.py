@@ -29,7 +29,7 @@ def main():
     import setproctitle
     from torch import nn
     import wandb
-
+    torch.set_num_threads(4)
     #------------------------------------------#
     def evaluate(algo, env,max_episode_length):
         global max_value
@@ -77,6 +77,18 @@ def main():
         t = np.array([0 for _ in range(num_envs)])
         eval_thread = None
         state,_ = env.reset()
+        log_cnt = 0
+
+        print('train failure function')
+        for iter in range(100):
+            print(f'{iter}/{100}:',end='\r')
+            log_info = {'log_cnt':log_cnt}
+            algo.update_failure(num_step=1000,log_info = log_info)
+            try:
+                wandb.log(log_info, step = log_info['log_cnt'])
+            except:
+                print(log_info)
+            log_cnt += 1
 
         print('start training')
         for step in range(1,num_training_step//num_envs+1):
@@ -84,9 +96,13 @@ def main():
                 print(f'train: {step/(num_training_step//num_envs)*100:.2f}% {step}/{num_training_step//num_envs}', end='\r')
             state, t = algo.step(env, state, t)
             if algo.is_update(step*num_envs):
-                    log_info = {'log_cnt':(step*num_envs)//buffer_size}
+                    log_info = {'log_cnt':log_cnt}
                     algo.update(log_info)
-                    wandb.log(log_info, step = log_info['log_cnt'])
+                    try:
+                        wandb.log(log_info, step = log_info['log_cnt'])
+                    except:
+                        print(log_info)
+                    log_cnt += 1
                     
             if step % (eval_interval//num_envs) == 0:
                 algo.save_models(f'{weight_path}/s{seed}-latest')
@@ -100,31 +116,23 @@ def main():
                     eval_thread.start()
         algo.save_models(f'{weight_path}/s{seed}-finish')
 
-    setproctitle.setproctitle(f'{env_name}-PPO-{seed}')
+    setproctitle.setproctitle(f'{env_name}-MLE-online-{seed}')
     
-    num_expert = int(expert_buffer_path.split('/')[-1].split('.')[0])
-    print('expert buffer:',num_expert,expert_buffer_path)
-    expert_buffer = Trajectory_Buffer(
-        buffer_size=num_expert,
-        traj_len=max_episode_length, 
-        state_shape=state_shape, 
-        action_shape=action_shape, 
-        device=device,
-    )
-    expert_buffer.load(expert_buffer_path)
+    buffer_list = []
+    for (dir,num) in zip(expert_dir,expert_num):
+        expert_buffer = Trajectory_Buffer(
+            buffer_size=num,
+            traj_len=max_episode_length, 
+            state_shape=state_shape, 
+            action_shape=action_shape, 
+            device=device,
+        )
+        expert_buffer.load(dir)
+        print(f'load {num} trajectories from {dir}')
+        buffer_list.append(expert_buffer)
 
-    num_expert = int(noisy_buffer_path.split('/')[-1].split('.')[0])
-    print('noisy buffer:',num_expert,noisy_buffer_path)
-    noisy_buffer = Trajectory_Buffer(
-        buffer_size=num_expert,
-        traj_len=max_episode_length, 
-        state_shape=state_shape, 
-        action_shape=action_shape, 
-        device=device,
-    )
-    noisy_buffer.load(noisy_buffer_path)
-
-    algo = MLE_onpolicy(expert_buffer=expert_buffer,state_shape=state_shape, action_shape=action_shape,
+    algo = MLE_onpolicy(buffer_list=buffer_list,
+            state_shape=state_shape, action_shape=action_shape,
             device=device, seed=seed, gamma=gamma,buffer_size=buffer_size,
             hidden_units_actor=hidden_units_actor,hidden_units_critic=hidden_units_critic,
             lr_actor=lr_actor,lr_critic=lr_critic, epoch_ppo=epoch_ppo,

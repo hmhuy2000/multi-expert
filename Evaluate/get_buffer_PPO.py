@@ -41,11 +41,12 @@ def main():
             hidden_units=[256,256,256],
             hidden_activation=nn.Tanh()
         ).to(device)
-    expert_actor.load_state_dict(torch.load(
-        './weights/PPO/(0.214)-(1.00)-(2.14)-(63.67)/actor.pth'
-        # './weights/PPO/(0.696)-(1.00)-(6.96)-(47.28)/actor.pth'
-        # './weights/PPO/(1.135)-(1.00)-(11.35)-(38.87)/actor.pth'
-    ))
+    # expert_actor.load_state_dict(torch.load(
+    #     # './weights/PPO/(1.621)-(1.00)-(16.21)-(46.90)/actor.pth'
+    #     # './weights/PPO/(1.135)-(1.00)-(11.35)-(38.87)/actor.pth'
+    #     # './weights/PPO/(0.696)-(1.00)-(6.96)-(47.28)/actor.pth'
+    #     './weights/PPO/(0.214)-(1.00)-(2.14)-(63.67)/actor.pth'
+    # ))
     expert_actor.eval()
     buffer_size = 1000
     rollout_traj_buffer = Trajectory_Buffer(
@@ -93,7 +94,7 @@ def main():
         print(f'{rollout_traj_buffer._n}/{buffer_size},{rollout_traj_buffer.total_rewards.mean():.2f},{rollout_traj_buffer.total_costs.mean():.2f}',end='\r')
             
     print(rollout_traj_buffer.total_rewards.mean(),rollout_traj_buffer.total_costs.mean())
-    rollout_traj_buffer.save(f'./buffers/e/{buffer_size}.pt')
+    rollout_traj_buffer.save(f'./buffers/{"SafetyPointPush1-v0"}/e4/{buffer_size}.pt')
     env.close()
 
 if __name__ == '__main__':

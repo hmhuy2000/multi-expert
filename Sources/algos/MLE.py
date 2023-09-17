@@ -1,7 +1,10 @@
 import torch
 from torch import nn
 from torch.optim import Adam
+import torch.nn.functional as F
 import numpy as np
+from tqdm import trange
+
 
 from Sources.buffers.rollout_buffers import Trajectory_Buffer
 from Sources.algos.PPO import PPO_continuous
@@ -17,8 +20,15 @@ def calculate_gae(values, rewards, dones, next_values, gamma, lambd):
         gaes[t] = deltas[t] + gamma * lambd * (1 - dones[t]) * gaes[t + 1]
     return gaes + values, (gaes - gaes.mean()) / (gaes.std() + 1e-8)
 
+def get_indices_with_high_low(high, low):
+    delta = high - low
+    logits = torch.nn.functional.one_hot(delta)
+    avails = 1.0 - logits.cumsum(-1)
+    logits = avails.log_softmax(-1) + avails.log()
+    return low + logits.softmax(-1).multinomial(1).squeeze(-1)
+
 class MLE_onpolicy(PPO_continuous):
-    def __init__(self,expert_buffer, state_shape, action_shape, device, seed, gamma,
+    def __init__(self,buffer_list, state_shape, action_shape, device, seed, gamma,
         buffer_size, hidden_units_actor, hidden_units_critic,
         lr_actor, lr_critic, epoch_ppo, clip_eps, lambd, coef_ent,
         max_grad_norm,reward_factor,max_episode_length,
@@ -29,22 +39,17 @@ class MLE_onpolicy(PPO_continuous):
         max_grad_norm,reward_factor,max_episode_length,
         num_envs,primarive=True)
 
-        self.expert_buffer = expert_buffer
+        self.buffer_list = buffer_list
+        assert len(self.buffer_list)>1
         if (primarive):
             self.failure_network = StateActionFunction(
                 state_shape=state_shape,
                 action_shape=action_shape,
                 hidden_units=hidden_units_critic,
-                hidden_activation=nn.Tanh()
+                hidden_activation=nn.Tanh(),
+                num_class=len(buffer_list)
             ).to(device)
-            self.rollout_traj_buffer = Trajectory_Buffer(
-                buffer_size=100,
-                traj_len=max_episode_length, 
-                state_shape=state_shape, 
-                action_shape=action_shape, 
-                device=device,
-            )
-            self.optim_failure = Adam(self.failure_network.parameters(), lr=3*lr_critic)
+            self.optim_failure = Adam(self.failure_network.parameters(), lr=lr_critic)
         self.return_cost = []
         self.tmp_return_cost = [0 for _ in range(self.num_envs)]
         self.batch_size = 64
@@ -65,22 +70,9 @@ class MLE_onpolicy(PPO_continuous):
 
             if (done[idx]):
                 reset_arr.append(idx)
-                arr_states = []
-                arr_actions = []
-                arr_next_states = []
                 for (tmp_state,tmp_action,tmp_reward,tmp_c,tmp_mask,tmp_log_pi,tmp_next_state) in self.tmp_buffer[idx]:
                     self.buffer.append(tmp_state, tmp_action, tmp_reward,self.tmp_return_reward[idx],
                      tmp_c, tmp_mask, tmp_log_pi, tmp_next_state)
-                    arr_states.append(tmp_state)
-                    arr_actions.append(tmp_action)
-                    arr_next_states.append(tmp_next_state)
-                
-                arr_states = np.array(arr_states)
-                arr_actions = np.array(arr_actions)
-                arr_next_states = np.array(arr_next_states)
-                self.rollout_traj_buffer.append(arr_states,arr_actions,self.tmp_return_reward[idx],
-                    self.tmp_return_cost[idx], arr_next_states)
-
                 self.tmp_buffer[idx] = []
                 self.ep_len.append(ep_len[idx])
                 self.return_reward.append(self.tmp_return_reward[idx])
@@ -97,18 +89,7 @@ class MLE_onpolicy(PPO_continuous):
         self.learning_steps += 1
         states, actions, env_rewards,env_total_rewards, costs, dones, log_pis, next_states = \
             self.buffer.get()
-        
-        for _ in range(1000):
-            pi_states,pi_actions,pi_total_rewards,pi_total_costs,pi_next_states = \
-                self.rollout_traj_buffer.sample(batch_size=self.batch_size)
-            exp_states,exp_actions,exp_total_rewards,exp_total_costs,exp_next_states = \
-                self.expert_buffer.sample(batch_size=self.batch_size)
-            pi_fail_scores, exp_fail_scores = self.update_failure_network(
-                pi_states,exp_states,
-                pi_actions,exp_actions,
-                pi_total_rewards,exp_total_rewards
-                )
-
+                    
         env_rewards = env_rewards.clamp(min=-3.0,max=3.0)
         failure_rewards = -self.failure_network.get_falure_state_action_score(states, actions).detach()
         rewards = failure_rewards
@@ -119,34 +100,77 @@ class MLE_onpolicy(PPO_continuous):
             'Train/cost':np.mean(self.return_cost),
             'Train/epLen':np.mean(self.ep_len),
             'Update/reward':failure_rewards.mean(),
-            'Update/pi_fail_scores':pi_fail_scores,
-            'Update/exp_fail_scores':exp_fail_scores,
         })
         self.return_reward = []
         self.ep_len = []
 
-    def update_failure_network(self,
-                               noise_states,exp_states,
-                                noise_actions,exp_actions,
-                                noise_total_rewards,exp_total_rewards
-                               ):
-        noise_fail_scores = self.failure_network.get_falure_trajectory_score(noise_states,noise_actions)
-        exp_fail_scores = self.failure_network.get_falure_trajectory_score(exp_states,exp_actions)
-
-        fail_scores = torch.concat((noise_fail_scores,exp_fail_scores),dim=0)
-        total_rewards  = torch.concat((noise_total_rewards,exp_total_rewards),dim=0)
-
-        fail_matrix = fail_scores - fail_scores.view(1, -1)
-        reward_dist = (total_rewards - total_rewards.view(1, -1))
-        factor = 1/((3*reward_dist).clamp(min=1.0).detach())
-
-        loss_failure = (reward_dist.clamp(min=0.0,max=1.0).detach()*(factor*fail_matrix**2 + fail_matrix)).mean()
-        loss_expert = (exp_fail_scores**2).mean()
+    def update_failure_network(self,selected_states,selected_actions,
+                               lower_states,lower_actions,
+                               equal_states, equal_actions):
+        selected_scores = self.failure_network.get_falure_trajectory_score(selected_states,selected_actions)
+        lower_scores = self.failure_network.get_falure_trajectory_score(lower_states,lower_actions)
+        equal_scores = self.failure_network.get_falure_trajectory_score(equal_states, equal_actions)
+        
+        value_loss = -F.logsigmoid(lower_scores - selected_scores).mean()
+        rank_loss =  F.l1_loss(selected_scores,equal_scores)
         self.optim_failure.zero_grad()
-        (loss_failure+loss_expert).backward(retain_graph=False)
+        (value_loss+rank_loss).backward(retain_graph=False)
         nn.utils.clip_grad_norm_(self.failure_network.parameters(), self.max_grad_norm)
         self.optim_failure.step()
-        return noise_fail_scores.mean().item(), exp_fail_scores.mean().item()
+        return value_loss.item(),rank_loss.item()
+
+    def update_failure(self,num_step,log_info):
+        for iter in range(num_step):
+            print(f'\t\t{iter}/{num_step}',end='\r')
+            exp_states = []
+            exp_actions = []
+            exp_next_states = []
+            for exp_id in range(len(self.buffer_list)):
+                _states,_actions,_,_,_ = \
+                    self.buffer_list[exp_id].sample(batch_size=self.batch_size)
+                exp_states.append(_states)
+                exp_actions.append(_actions)
+
+            exp_states = torch.cat(exp_states,dim=0).to(self.device)
+            exp_actions = torch.cat(exp_actions,dim=0).to(self.device)
+
+            pair_batch_size = self.batch_size*len(self.buffer_list)
+            with torch.no_grad():
+                selected_indices = torch.randint(low=0, high=exp_states.shape[0] - self.batch_size, size=(pair_batch_size,)).to(self.device)
+                
+                lower_low = (selected_indices // self.batch_size+1) * self.batch_size
+                lower_high = exp_states.shape[0]
+                lower_indices = get_indices_with_high_low(low=lower_low,high=lower_high)
+                
+                equal_low = (selected_indices // self.batch_size) * self.batch_size
+                equal_high = (selected_indices // self.batch_size+1) * self.batch_size
+                equal_indices = get_indices_with_high_low(low=equal_low,high=equal_high)
+            
+            selected_states = exp_states[selected_indices]
+            selected_actions = exp_actions[selected_indices]
+            lower_states = exp_states[lower_indices]
+            lower_actions = exp_actions[lower_indices]
+            equal_states = exp_states[equal_indices]
+            equal_actions = exp_actions[equal_indices]
+
+            value_loss,rank_loss = self.update_failure_network(selected_states=selected_states,selected_actions=selected_actions,
+                                                    lower_states=lower_states,lower_actions=lower_actions,
+                                                    equal_states=equal_states,equal_actions=equal_actions)
+            
+        for exp_id in range(len(self.buffer_list)):
+            _states,_actions,_,_,_next_states = \
+                self.buffer_list[exp_id].sample(batch_size=self.batch_size)
+            with torch.no_grad():
+                scores = self.failure_network.get_falure_trajectory_score(_states,_actions)
+            log_info.update({
+                f'Failure/e_{exp_id}_mean':scores.mean().item(),
+                f'Failure/e_{exp_id}_std':scores.std().item(),
+            })
+        log_info.update({
+            'Loss/value_loss':value_loss,
+            'Loss/rank_loss':rank_loss,
+        })
+        return log_info
 
 class MLE_offpolicy(SAC_continuous):
     def __init__(self,expert_buffer, noisy_buffer, state_shape, action_shape, device, seed, gamma,
