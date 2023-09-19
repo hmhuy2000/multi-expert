@@ -2,7 +2,7 @@
 weights/
 safety-gymnasium/
 wandb/
-
+failure_function/
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]

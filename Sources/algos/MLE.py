@@ -9,7 +9,7 @@ from tqdm import trange
 from Sources.buffers.rollout_buffers import Trajectory_Buffer
 from Sources.algos.PPO import PPO_continuous
 from Sources.algos.SAC import SAC_continuous
-from Sources.networks.value import StateActionFunction
+from Sources.networks.value import FailureFunction
 
 def calculate_gae(values, rewards, dones, next_values, gamma, lambd):
     deltas = rewards + gamma * next_values * (1 - dones) - values
@@ -42,7 +42,7 @@ class MLE_onpolicy(PPO_continuous):
         self.buffer_list = buffer_list
         assert len(self.buffer_list)>1
         if (primarive):
-            self.failure_network = StateActionFunction(
+            self.failure_network = FailureFunction(
                 state_shape=state_shape,
                 action_shape=action_shape,
                 hidden_units=hidden_units_critic,
@@ -52,7 +52,7 @@ class MLE_onpolicy(PPO_continuous):
             self.optim_failure = Adam(self.failure_network.parameters(), lr=lr_critic)
         self.return_cost = []
         self.tmp_return_cost = [0 for _ in range(self.num_envs)]
-        self.batch_size = 64
+        self.batch_size = 128
         
     def step(self, env, state, ep_len):
         action, log_pi = self.explore(state)
@@ -91,7 +91,9 @@ class MLE_onpolicy(PPO_continuous):
             self.buffer.get()
                     
         env_rewards = env_rewards.clamp(min=-3.0,max=3.0)
+        self.failure_network.eval()
         failure_rewards = -self.failure_network.get_falure_state_action_score(states, actions).detach()
+        self.failure_network.train()
         rewards = failure_rewards
         self.update_ppo(states, actions, rewards, dones, log_pis, next_states,log_info)
 
@@ -106,25 +108,26 @@ class MLE_onpolicy(PPO_continuous):
 
     def update_failure_network(self,selected_states,selected_actions,
                                lower_states,lower_actions,
-                               equal_states, equal_actions):
+                            #    equal_states, equal_actions
+                               ):
         selected_scores = self.failure_network.get_falure_trajectory_score(selected_states,selected_actions)
         lower_scores = self.failure_network.get_falure_trajectory_score(lower_states,lower_actions)
-        equal_scores = self.failure_network.get_falure_trajectory_score(equal_states, equal_actions)
+        # equal_scores = self.failure_network.get_falure_trajectory_score(equal_states, equal_actions)
         
         value_loss = -F.logsigmoid(lower_scores - selected_scores).mean()
-        rank_loss =  F.l1_loss(selected_scores,equal_scores)
+        # value_loss = (selected_scores/lower_scores).mean()
+        # rank_loss =  F.l1_loss(selected_scores,equal_scores)
         self.optim_failure.zero_grad()
-        (value_loss+rank_loss).backward(retain_graph=False)
+        (value_loss).backward(retain_graph=False)
         nn.utils.clip_grad_norm_(self.failure_network.parameters(), self.max_grad_norm)
         self.optim_failure.step()
-        return value_loss.item(),rank_loss.item()
+        return value_loss.item()
 
     def update_failure(self,num_step,log_info):
         for iter in range(num_step):
             print(f'\t\t{iter}/{num_step}',end='\r')
             exp_states = []
             exp_actions = []
-            exp_next_states = []
             for exp_id in range(len(self.buffer_list)):
                 _states,_actions,_,_,_ = \
                     self.buffer_list[exp_id].sample(batch_size=self.batch_size)
@@ -142,24 +145,25 @@ class MLE_onpolicy(PPO_continuous):
                 lower_high = exp_states.shape[0]
                 lower_indices = get_indices_with_high_low(low=lower_low,high=lower_high)
                 
-                equal_low = (selected_indices // self.batch_size) * self.batch_size
-                equal_high = (selected_indices // self.batch_size+1) * self.batch_size
-                equal_indices = get_indices_with_high_low(low=equal_low,high=equal_high)
+                # equal_low = (selected_indices // self.batch_size) * self.batch_size
+                # equal_high = (selected_indices // self.batch_size+1) * self.batch_size
+                # equal_indices = get_indices_with_high_low(low=equal_low,high=equal_high)
             
             selected_states = exp_states[selected_indices]
             selected_actions = exp_actions[selected_indices]
             lower_states = exp_states[lower_indices]
             lower_actions = exp_actions[lower_indices]
-            equal_states = exp_states[equal_indices]
-            equal_actions = exp_actions[equal_indices]
+            # equal_states = exp_states[equal_indices]
+            # equal_actions = exp_actions[equal_indices]
 
-            value_loss,rank_loss = self.update_failure_network(selected_states=selected_states,selected_actions=selected_actions,
+            value_loss = self.update_failure_network(selected_states=selected_states,selected_actions=selected_actions,
                                                     lower_states=lower_states,lower_actions=lower_actions,
-                                                    equal_states=equal_states,equal_actions=equal_actions)
+                                                    # equal_states=equal_states,equal_actions=equal_actions
+                                                    )
             
         for exp_id in range(len(self.buffer_list)):
             _states,_actions,_,_,_next_states = \
-                self.buffer_list[exp_id].sample(batch_size=self.batch_size)
+                self.buffer_list[exp_id].get()
             with torch.no_grad():
                 scores = self.failure_network.get_falure_trajectory_score(_states,_actions)
             log_info.update({
@@ -167,8 +171,8 @@ class MLE_onpolicy(PPO_continuous):
                 f'Failure/e_{exp_id}_std':scores.std().item(),
             })
         log_info.update({
-            'Loss/value_loss':value_loss,
-            'Loss/rank_loss':rank_loss,
+            'Loss/expert_loss':value_loss,
+            # 'Loss/rank_loss':rank_loss,
         })
         return log_info
 

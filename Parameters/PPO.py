@@ -21,11 +21,11 @@ training_group.add_argument('--lambd', type=float, default=0.97)
 training_group.add_argument('--coef_ent', type=float, default=0.0001)
 training_group.add_argument('--max_grad_norm', type=float, default=1.0)
 training_group.add_argument('--num_training_step',type=int,default=int(3e7))
-training_group.add_argument('--eval_interval',type=int,default=int(3e5))
+training_group.add_argument('--eval_interval',type=int,default=int(1e5))
 training_group.add_argument('--num_eval_episodes',type=int,default=100)
 training_group.add_argument('--max_episode_length',type=int,default=1000)
 training_group.add_argument('--reward_factor',type=float,default=1.0)
-training_group.add_argument('--weight_path', type=str, default='./weights/PPO')
+training_group.add_argument('--weight_path', type=str, default='./weights')
 
 training_group.add_argument('--begin_cpu',type=int,default=0)
 training_group.add_argument('--end_cpu',type=int,default=96)
@@ -68,7 +68,7 @@ num_envs                                = args.num_envs
 eval_num_envs                           = args.eval_num_envs
 weight_path                             = args.weight_path
 
-
+weight_path = os.path.join(weight_path,env_name,'PPO')
 log_path = f'{weight_path}/log_data'
 os.makedirs(weight_path,exist_ok=True)
 os.makedirs(log_path,exist_ok=True)

@@ -7,8 +7,8 @@ def main():
     from Sources.utils import VectorizedWrapper
     num_envs = 25
 
-    sample_env = safety_gymnasium.make('SafetyPointPush1-v0')
-    env = [safety_gymnasium.make(id='SafetyPointPush1-v0') for _ in range(num_envs)]
+    sample_env = safety_gymnasium.make('SafetyPointGoal1-v0')
+    env = [safety_gymnasium.make(id='SafetyPointGoal1-v0') for _ in range(num_envs)]
     env = VectorizedWrapper(env)
     state_shape=sample_env.observation_space.shape
     action_shape=sample_env.action_space.shape
@@ -47,6 +47,15 @@ def main():
     #     # './weights/PPO/(0.696)-(1.00)-(6.96)-(47.28)/actor.pth'
     #     './weights/PPO/(0.214)-(1.00)-(2.14)-(63.67)/actor.pth'
     # ))
+    
+    expert_actor.load_state_dict(torch.load(
+        './weights/SafetyPointGoal1-v0/PPO/(0.494)-(1.00)-(4.94)-(82.58)/actor.pth'
+        # './weights/SafetyPointGoal1-v0/PPO/(1.505)-(1.00)-(15.05)-(68.56)/actor.pth'
+        # './weights/SafetyPointGoal1-v0/PPO/(2.099)-(1.00)-(20.99)-(50.44)/actor.pth'
+        # './weights/SafetyPointGoal1-v0/PPO/(2.545)-(1.00)-(25.45)-(50.84)/actor.pth'
+        # './weights/SafetyPointGoal1-v0/PPO/(2.710)-(1.00)-(27.10)-(52.71)/actor.pth'
+    ))
+    
     expert_actor.eval()
     buffer_size = 1000
     rollout_traj_buffer = Trajectory_Buffer(
@@ -94,7 +103,7 @@ def main():
         print(f'{rollout_traj_buffer._n}/{buffer_size},{rollout_traj_buffer.total_rewards.mean():.2f},{rollout_traj_buffer.total_costs.mean():.2f}',end='\r')
             
     print(rollout_traj_buffer.total_rewards.mean(),rollout_traj_buffer.total_costs.mean())
-    rollout_traj_buffer.save(f'./buffers/{"SafetyPointPush1-v0"}/e4/{buffer_size}.pt')
+    rollout_traj_buffer.save(f'./buffers/{"SafetyPointGoal1-v0"}/e4/{buffer_size}.pt')
     env.close()
 
 if __name__ == '__main__':

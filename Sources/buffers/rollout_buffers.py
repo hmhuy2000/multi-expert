@@ -105,6 +105,16 @@ class Trajectory_Buffer:
             self.next_states[idxes]
         )
     
+    def get(self):
+        idxes = slice(0, self._n)
+        return (
+            self.states[idxes],
+            self.actions[idxes],
+            self.total_rewards[idxes],
+            self.total_costs[idxes],
+            self.next_states[idxes]
+        )
+    
     def load(self,path):
         tmp = torch.load(path)
         self._n = tmp['states'].size(0)
@@ -117,7 +127,7 @@ class Trajectory_Buffer:
         self._n = self.total_size
 
     def save(self, path):
-        os.makedirs(os.path.dirname(path))
+        os.makedirs(os.path.dirname(path),exist_ok=True)
         torch.save({
             'states': self.states.clone().cpu(),
             'actions': self.actions.clone().cpu(),

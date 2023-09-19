@@ -79,17 +79,37 @@ def main():
         state,_ = env.reset()
         log_cnt = 0
 
-        print('train failure function')
-        for iter in range(100):
-            print(f'{iter}/{100}:',end='\r')
-            log_info = {'log_cnt':log_cnt}
-            algo.update_failure(num_step=1000,log_info = log_info)
-            try:
-                wandb.log(log_info, step = log_info['log_cnt'])
-            except:
-                print(log_info)
-            log_cnt += 1
+        # print('train failure function')
+        # num_iter = 500
+        # for iter in range(num_iter):
+        #     print(f'{iter}/{num_iter}:',end='\r')
+        #     log_info = {'log_cnt':log_cnt}
+        #     algo.update_failure(num_step=1000,log_info = log_info)
+        #     try:
+        #         wandb.log(log_info, step = log_info['log_cnt'])
+        #     except:
+        #         print(log_info)
+        #     log_cnt += 1
+        #     if (iter and iter%50 == 0):
+        #         save_dir = f'failure_function/{env_name}/{iter}'
+        #         os.makedirs(save_dir,exist_ok=True)
+        #         torch.save(algo.failure_network.state_dict(), f'{save_dir}/failure_network.pth')
 
+        algo.failure_network.load_state_dict(torch.load(
+            './failure_function/SafetyPointPush1-v0/350/failure_network.pth'
+            # './failure_function/SafetyPointGoal1-v0/300/failure_network.pth'
+            ))
+        algo.failure_network.eval()
+        # for exp_id in range(len(algo.buffer_list)):
+        #     _states,_actions,_,_,_next_states = \
+        #         algo.buffer_list[exp_id].get()
+        #     _states = _states.view(-1,_states.shape[-1])
+        #     _actions = _actions.view(-1,_actions.shape[-1])
+        #     with torch.no_grad():
+        #         scores = algo.failure_network.get_falure_state_action_score(_states,_actions)
+        #     print(exp_id,scores.mean().item())
+         
+        # raise
         print('start training')
         for step in range(1,num_training_step//num_envs+1):
             if (step%100 == 0):
@@ -140,8 +160,8 @@ def main():
             max_grad_norm=max_grad_norm,reward_factor=reward_factor,
             max_episode_length=max_episode_length,num_envs=num_envs)
     eval_algo = deepcopy(algo)
-    wandb.init(project=f'test-{env_name}', settings=wandb.Settings(_disable_stats=True), \
-        group='MLE-test', name=f'{seed}', entity='hmhuy')
+    # wandb.init(project=f'test-{env_name}', settings=wandb.Settings(_disable_stats=True), \
+    #     group='MLE-test', name=f'{seed}', entity='hmhuy')
 
     train(env=env,test_env=test_env,algo=algo,eval_algo=eval_algo)
 
